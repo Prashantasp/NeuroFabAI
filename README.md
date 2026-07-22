@@ -190,12 +190,19 @@ http://localhost:8000/docs
 
 # 📸 Screenshots
 
-> Add screenshots of:
 
 - Dashboard
+  <img width="1920" height="1080" alt="Screenshot 2026-07-22 041307" src="https://github.com/user-attachments/assets/2283094b-01da-4fd7-a50b-12c0dc8afe95" />
+
 - Document Upload
+  <img width="1920" height="1080" alt="Screenshot 2026-07-22 041329" src="https://github.com/user-attachments/assets/f1d41630-e3b7-44a6-9f00-1636a820777b" />
+
 - Knowledge Graph
+  <img width="1920" height="1080" alt="Screenshot 2026-07-22 041335" src="https://github.com/user-attachments/assets/7361cfbe-8caf-4ef3-9512-a1857df49720" />
+
 - AI Chat Interface
+  <img width="1920" height="1080" alt="Screenshot 2026-07-22 041324" src="https://github.com/user-attachments/assets/f47c21f8-2cf9-4751-88ab-a3dfa03f94b0" />
+
 
 ---
 
@@ -229,7 +236,3 @@ Contributions are welcome!
 - GitHub: https://github.com/Prashantasp
 
 ---
-
-# ⭐ Show Your Support
-
-If you found this project helpful, consider giving it a **Star ⭐** on GitHub.
