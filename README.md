@@ -1,5 +1,7 @@
 # NeuroFab AI
 
+### The Industrial Intelligence Fabric
+
 Turn industrial documents into a queryable knowledge graph, then ask questions
 that are answered from those documents and cite them.
 
@@ -15,6 +17,36 @@ attribution, not whether a claim follows from the quote: confidence is therefore
 null and `grounded` is false; insufficient-evidence responses also have no risk
 rating. Check original sources before acting. Provider
 failures return a clear, retryable error.
+
+---
+
+## Key features
+
+- Upload and process industrial manuals, SOPs, and inspection reports
+- Search document passages with Qdrant and explore relationships in Neo4j
+- Ask the Copilot questions with document citations and evidence quotes
+- Manage authenticated users, workspaces, and role-based access
+- Run PostgreSQL, Qdrant, and Neo4j locally with Docker Compose
+
+## Tech stack
+
+| Area | Technologies |
+|---|---|
+| Frontend | Next.js 16 App Router, React, TypeScript, Tailwind CSS |
+| Backend | Python, FastAPI, SQLAlchemy, LangGraph |
+| Data | PostgreSQL, Qdrant, Neo4j |
+| AI | Google Gemini for reasoning and embeddings |
+| Infrastructure | Docker and Docker Compose |
+
+## Project structure
+
+```text
+NeuroFabAI/
+├── frontend/              # Next.js application
+├── backend/               # FastAPI API, migrations, and tests
+├── docker-compose.yml     # Local database services
+└── README.md
+```
 
 ---
 
@@ -87,6 +119,13 @@ extraction also rejects evidence quotes absent from the supplied document text.
 - Node.js 20+
 - Docker (for PostgreSQL, Qdrant, Neo4j)
 - A Google Gemini API key — https://aistudio.google.com/apikey
+
+Clone the repository before following the setup steps:
+
+```bash
+git clone https://github.com/Prashantasp/NeuroFabAI.git
+cd NeuroFabAI
+```
 
 ### 1. Infrastructure
 
@@ -342,3 +381,54 @@ retry ingestion through the UI after changing provider settings.
 Copilot sections not relevant to a question remain empty. Every populated
 section must still have a valid source quote. Risk ratings require an explicit
 classification in a cited source; factual answers do not default to Low risk.
+
+
+---
+
+## Screenshots
+
+- Dashboard
+  <img width="1920" height="1080" alt="Screenshot 2026-07-22 041307" src="https://github.com/user-attachments/assets/2283094b-01da-4fd7-a50b-12c0dc8afe95" />
+
+- Document Upload
+  <img width="1920" height="1080" alt="Screenshot 2026-07-22 041329" src="https://github.com/user-attachments/assets/f1d41630-e3b7-44a6-9f00-1636a820777b" />
+
+- Knowledge Graph
+  <img width="1920" height="1080" alt="Screenshot 2026-07-22 041335" src="https://github.com/user-attachments/assets/7361cfbe-8caf-4ef3-9512-a1857df49720" />
+
+- AI Chat Interface
+  <img width="1920" height="1080" alt="Screenshot 2026-07-22 041324" src="https://github.com/user-attachments/assets/f47c21f8-2cf9-4751-88ab-a3dfa03f94b0" />
+
+
+---
+
+## Roadmap
+
+- Evaluate additional LLM providers
+- Add shared rate limiting for multiple API replicas
+- Package and validate Kubernetes deployment
+
+Authentication, workspace roles, streaming responses, document versioning, and
+the agent workflow are already implemented; see the sections above for their
+current behavior and deployment constraints.
+
+---
+
+## Contributing
+
+Contributions are welcome!
+
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Open a Pull Request
+
+---
+
+## Author
+
+**Prashant Nigam**
+
+- GitHub: https://github.com/Prashantasp
+
+---
