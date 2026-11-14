@@ -1,140 +1,214 @@
+"""Extract a knowledge graph from document text using the configured LLM."""
+
+from __future__ import annotations
+
 import json
-import uuid
 import logging
-from typing import List
+import uuid
 from datetime import datetime, timezone
+from typing import Any, Dict, List
+
 from pydantic import BaseModel, Field
-from google import genai
-from google.genai import types
-from app.schemas.knowledge import KnowledgeGraphExtraction, Entity, Relationship, ConfidenceBand
+
+from app.core.config import get_settings
+from app.schemas.knowledge import (
+    ConfidenceBand,
+    Entity,
+    KnowledgeGraphExtraction,
+    Relationship,
+)
 from app.services.entity_resolver import entity_resolver
+from app.services.llm import LLMError, LLMNotConfigured, get_llm_provider
 
 logger = logging.getLogger(__name__)
 
-def get_confidence_band(score: float) -> ConfidenceBand:
+ENTITY_TYPES = (
+    "Equipment", "Component", "FailureMode", "Process", "Material",
+    "Measurement", "Standard", "Document", "Location", "Role",
+)
+
+SYSTEM_PROMPT = f"""You extract structured knowledge graphs from industrial and \
+technical documentation (SOPs, maintenance manuals, inspection reports).
+
+Extract only entities and relationships that are explicitly stated in the text. \
+Do not infer plant equipment that is not mentioned. Do not invent tag numbers.
+
+Use these entity types where they fit: {', '.join(ENTITY_TYPES)}.
+Use SCREAMING_SNAKE_CASE relationship types such as HAS_COMPONENT, \
+HAS_FAILURE_MODE, CAUSES, INDICATES, REQUIRES, PREVENTS, MEASURED_BY, \
+GOVERNED_BY, LOCATED_IN, PERFORMED_BY.
+
+Preserve explicit causal direction: when the text says X causes or produces Y,
+emit X --CAUSES--> Y, not INDICATES. INDICATES is reserved for a symptom pointing
+to a condition, not a condition producing a symptom. Include each explicitly
+stated cause/effect pair. Preserve qualifiers such as "blocked" on the causal
+entity so an equipment component is not inherently labelled as a failure.
+
+Every relationship's source and target must exactly match an entity name you \
+returned. Set confidence to how clearly the text supports each extraction.
+"""
+
+
+class ExtractedEntity(BaseModel):
+    name: str = Field(description="Entity name exactly as written in the text.")
+    type: str = Field(description="One of the allowed entity types.")
+    properties_json: str = Field(
+        default="{}",
+        description='JSON object of attributes stated in the text, e.g. {"tag":"P-101"}.',
+    )
+    evidence_snippet: str = Field(description="Short verbatim quote supporting this entity.")
+    confidence: float = Field(description="0.0-1.0 confidence.")
+
+
+class ExtractedRelationship(BaseModel):
+    source_entity_name: str
+    target_entity_name: str
+    type: str = Field(description="SCREAMING_SNAKE_CASE relationship type.")
+    evidence: str = Field(description="Short verbatim quote supporting this relationship.")
+    confidence: float = Field(description="0.0-1.0 confidence.")
+
+
+class ExtractionResult(BaseModel):
+    entities: List[ExtractedEntity] = Field(default_factory=list)
+    relationships: List[ExtractedRelationship] = Field(default_factory=list)
+
+
+def confidence_band(score: float) -> ConfidenceBand:
     if score >= 0.90:
         return ConfidenceBand.HIGH
-    elif score >= 0.75:
+    if score >= 0.75:
         return ConfidenceBand.MEDIUM
     return ConfidenceBand.LOW
 
-# We define Pydantic schemas that match the expected output format for Gemini
-class GeminiEntity(BaseModel):
-    name: str = Field(description="The name of the entity.")
-    type: str = Field(description="The type of the entity (e.g., Equipment, Component, FailureMode, Document).")
-    properties_json: str = Field(description="A JSON string representing key-value pairs of properties for this entity.")
-    evidence_snippet: str = Field(description="A short snippet from the text supporting this extraction.")
-    confidence: float = Field(description="A confidence score between 0.0 and 1.0.")
 
-class GeminiRelationship(BaseModel):
-    source_entity_name: str = Field(description="The name of the source entity (must match one of the extracted entities).")
-    target_entity_name: str = Field(description="The name of the target entity (must match one of the extracted entities).")
-    type: str = Field(description="The relationship type (e.g., USES_COMPONENT, HAS_FAILURE_MODE).")
-    evidence: str = Field(description="A short snippet from the text supporting this relationship.")
-    confidence: float = Field(description="A confidence score between 0.0 and 1.0.")
+def _parse_properties(raw: str) -> Dict[str, Any]:
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else {"value": parsed}
+    except json.JSONDecodeError:
+        return {"raw": raw[:500]}
 
-class GeminiExtraction(BaseModel):
-    entities: List[GeminiEntity]
-    relationships: List[GeminiRelationship]
 
 class KnowledgeExtractor:
-    """
-    A service that extracts structured knowledge (entities and relationships)
-    from unstructured text chunks using Google Gemini.
-    """
-    
-    def __init__(self, model_name: str = "gemini-flash-latest"):
-        self.model_name = model_name
-        import os
-        self.client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY"))
-    
-    def extract_from_chunks(self, document_id: str, chunks: List[str]) -> KnowledgeGraphExtraction:
-        logger.info(f"Extracting knowledge from {len(chunks)} chunks for document {document_id}")
-        
-        now = datetime.now(timezone.utc)
-        
-        # We can extract from all chunks by concatenating or processing sequentially.
-        # For MVP, we combine up to a safe limit.
-        full_text = "\n\n".join(chunks[:10]) # Limit to 10 chunks for speed/context in demo
-        
-        prompt = f"""
-        Analyze the following text from an industrial/technical document.
-        Extract the key entities (Equipment, Component, FailureMode, Document, Process, Material) 
-        and the relationships between them.
-        
-        TEXT:
-        {full_text}
+    def extract_from_chunks(
+        self, document_id: str, chunks: List[str]
+    ) -> KnowledgeGraphExtraction:
+        """Extract entities and relationships. Raises on model failure.
+
+        Callers are expected to mark the document's graph stage as FAILED rather
+        than silently storing an empty graph -- an empty result is
+        indistinguishable from "this document contains no knowledge", which
+        previously made extraction failures invisible.
         """
-        
-        try:
-            response = self.client.models.generate_content(
-                model=self.model_name,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    response_schema=GeminiExtraction,
-                    temperature=0.1,
+        settings = get_settings()
+        provider = get_llm_provider()
+
+        if not provider.available:
+            # Specific rather than the generic LLMError, so the document's
+            # failure_reason tells the operator to set a key instead of
+            # suggesting a transient outage they should wait out.
+            raise LLMNotConfigured(
+                "No language model configured; knowledge-graph extraction was skipped."
+            )
+        if not chunks:
+            return KnowledgeGraphExtraction(entities=[], relationships=[], version=1)
+
+        text = "\n\n".join(chunks[: settings.EXTRACTION_MAX_CHUNKS])
+        prompt = f"Extract the knowledge graph from this document text.\n\nTEXT:\n{text}"
+
+        result = provider.generate_structured(prompt, ExtractionResult, system=SYSTEM_PROMPT)
+        return self._to_domain(document_id, result, text)
+
+    @staticmethod
+    def _to_domain(document_id: str, result: ExtractionResult, source_text: str) -> KnowledgeGraphExtraction:
+        now = datetime.now(timezone.utc)
+        normalized = " ".join(source_text.split())
+
+        def supported(quote):
+            quote = " ".join((quote or "").split())
+            return bool(quote) and quote in normalized
+
+        entities: List[Entity] = []
+        # Canonical name -> id, so two mentions of the same entity in one
+        # document collapse into a single node instead of duplicating it.
+        canonical_to_id: Dict[str, str] = {}
+        name_to_id: Dict[str, str] = {}
+
+        for raw in result.entities:
+            name = (raw.name or "").strip()
+            if not name or not supported(raw.evidence_snippet):
+                continue
+            canonical = entity_resolver.resolve(name)
+
+            if canonical in canonical_to_id:
+                name_to_id[name] = canonical_to_id[canonical]
+                continue
+
+            entity_id = str(uuid.uuid4())
+            canonical_to_id[canonical] = entity_id
+            name_to_id[name] = entity_id
+
+            score = max(0.0, min(1.0, float(raw.confidence or 0.0)))
+            entities.append(
+                Entity(
+                    id=entity_id,
+                    type=(raw.type or "Entity").strip(),
+                    name=name,
+                    canonical_name=canonical,
+                    properties=_parse_properties(raw.properties_json),
+                    source_document_id=document_id,
+                    page_number=None,
+                    evidence_snippet=(raw.evidence_snippet or "")[:1000],
+                    extraction_timestamp=now,
+                    confidence=score,
+                    confidence_label=confidence_band(score),
+                    version=1,
                 )
             )
-            
-            structured_data = response.parsed
-            
-            # Map Gemini objects back to our application domain models
-            app_entities = []
-            entity_name_to_id = {}
-            
-            for gen_e in structured_data.entities:
-                e_id = str(uuid.uuid4())
-                entity_name_to_id[gen_e.name] = e_id
-                
-                props = {}
-                try:
-                    props = json.loads(gen_e.properties_json) if gen_e.properties_json else {}
-                except:
-                    props = {"raw": gen_e.properties_json}
-                
-                app_entities.append(Entity(
-                    id=e_id,
-                    type=gen_e.type,
-                    name=gen_e.name,
-                    canonical_name=entity_resolver.resolve(gen_e.name),
-                    properties=props,
+
+        relationships: List[Relationship] = []
+        seen: set = set()
+        for raw in result.relationships:
+            if not supported(raw.evidence):
+                continue
+            source_id = name_to_id.get((raw.source_entity_name or "").strip())
+            target_id = name_to_id.get((raw.target_entity_name or "").strip())
+            # Drop dangling references and self-loops; the validator rejects both
+            # and one bad edge should not fail the whole document.
+            if not source_id or not target_id or source_id == target_id:
+                continue
+
+            rel_type = (raw.type or "RELATED_TO").strip().upper().replace(" ", "_")
+            key = (source_id, target_id, rel_type)
+            if key in seen:
+                continue
+            seen.add(key)
+
+            score = max(0.0, min(1.0, float(raw.confidence or 0.0)))
+            relationships.append(
+                Relationship(
+                    source_entity_id=source_id,
+                    target_entity_id=target_id,
+                    type=rel_type,
                     source_document_id=document_id,
-                    page_number=1, # Defaulting for MVP
-                    evidence_snippet=gen_e.evidence_snippet,
+                    page_number=None,
+                    evidence=(raw.evidence or "")[:1000],
                     extraction_timestamp=now,
-                    confidence=gen_e.confidence,
-                    confidence_label=get_confidence_band(gen_e.confidence),
-                    version=1
-                ))
-                
-            app_relationships = []
-            for gen_r in structured_data.relationships:
-                # Resolve source and target IDs
-                s_id = entity_name_to_id.get(gen_r.source_entity_name)
-                t_id = entity_name_to_id.get(gen_r.target_entity_name)
-                
-                if s_id and t_id:
-                    app_relationships.append(Relationship(
-                        source_entity_id=s_id,
-                        target_entity_id=t_id,
-                        type=gen_r.type.upper(),
-                        source_document_id=document_id,
-                        page_number=1,
-                        evidence=gen_r.evidence,
-                        extraction_timestamp=now,
-                        confidence=gen_r.confidence,
-                        confidence_label=get_confidence_band(gen_r.confidence),
-                        version=1
-                    ))
-            
-            extraction = KnowledgeGraphExtraction(entities=app_entities, relationships=app_relationships, version=1)
-            logger.info(f"Extracted {len(app_entities)} entities and {len(app_relationships)} relationships.")
-            return extraction
-            
-        except Exception as e:
-            logger.error(f"Gemini extraction failed: {e}")
-            # Fallback for demo stability
-            return KnowledgeGraphExtraction(entities=[], relationships=[], version=1)
+                    confidence=score,
+                    confidence_label=confidence_band(score),
+                    version=1,
+                )
+            )
+
+        logger.info(
+            "Extracted %d entities and %d relationships from document %s",
+            len(entities), len(relationships), document_id,
+        )
+        return KnowledgeGraphExtraction(
+            entities=entities, relationships=relationships, version=1
+        )
+
 
 knowledge_extractor = KnowledgeExtractor()

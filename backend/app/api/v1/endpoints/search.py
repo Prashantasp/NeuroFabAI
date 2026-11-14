@@ -1,34 +1,38 @@
-from fastapi import APIRouter
-from pydantic import BaseModel
-from typing import List, Dict, Any
-from app.services.embeddings.gemini import GeminiEmbeddingProvider
-from app.services.vectorstore.qdrant import QdrantStore
-from app.services.embedding_service import EmbeddingService
+from typing import List, Literal
+
+from fastapi import APIRouter, Depends
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+
+from app.api.deps import WorkspaceContext, get_db, get_workspace_context
+from app.schemas.response import StandardResponse
+from app.services.search_service import SearchResult, search_service
 
 router = APIRouter()
 
-provider = GeminiEmbeddingProvider()
-store = QdrantStore()
 
 class SearchQuery(BaseModel):
-    query: str
-    limit: int = 5
+    query: str = Field(..., min_length=1, max_length=500)
+    limit: int = Field(10, ge=1, le=50)
+    strategy: Literal["keyword", "semantic", "graph", "hybrid"] = "hybrid"
 
-class SearchResult(BaseModel):
-    id: str
-    score: float
-    payload: Dict[str, Any]
 
-@router.post("/", response_model=List[SearchResult])
-def semantic_search(search_query: SearchQuery):
-    # 1. Embed the query
-    query_vector = provider.embed_texts([search_query.query])[0]
-    
-    # 2. Search the vector store
-    results = store.search(
-        collection_name="neurofab_documents",
-        query_vector=query_vector,
-        limit=search_query.limit
+@router.post(
+    "",
+    response_model=StandardResponse[List[SearchResult]],
+    summary="Search documents, excerpts, and graph entities",
+)
+def search(
+    payload: SearchQuery,
+    db: Session = Depends(get_db),
+    ctx: WorkspaceContext = Depends(get_workspace_context),
+):
+    """Scoped to the caller's verified workspace across all strategies."""
+    results = search_service.search(
+        query=payload.query,
+        strategy=payload.strategy,
+        limit=payload.limit,
+        workspace_id=ctx.workspace_id,
+        db=db,
     )
-    
-    return results
+    return StandardResponse(data=results)

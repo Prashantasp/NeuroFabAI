@@ -1,14 +1,41 @@
-fastapi==0.110.0
-uvicorn==0.27.1
+# --- Web framework ---------------------------------------------------------
+# fastapi >=0.115 required: google-genai pins httpx>=0.28.1, which older
+# starlette TestClient versions are incompatible with.
+fastapi==0.141.1
+uvicorn[standard]==0.27.1
+python-multipart==0.0.20
 
-pydantic==2.11.7
+# --- Configuration & validation --------------------------------------------
+pydantic==2.13.4
 pydantic-settings==2.11.0
+email-validator==2.3.0
+python-dotenv==1.0.1
 
-langchain==0.1.5
-langgraph==0.0.26
+# --- Database ---------------------------------------------------------------
+sqlalchemy>=2.0.30,<3.0.0
+alembic==1.13.1
+psycopg2-binary==2.9.9
 
+# --- Security ---------------------------------------------------------------
+passlib[bcrypt]==1.7.4
+bcrypt==4.1.2
+pyjwt==2.8.0
+
+# --- AI ---------------------------------------------------------------------
+google-genai>=1.0.0
+
+# --- Knowledge graph & vectors ----------------------------------------------
 neo4j==5.18.0
 qdrant-client==1.8.0
+networkx>=3.2
 
-python-dotenv==1.0.1
-python-multipart==0.0.20
+# --- Document processing ----------------------------------------------------
+pypdf>=4.2.0
+
+# --- Observability ----------------------------------------------------------
+structlog==24.1.0
+
+# --- Testing ----------------------------------------------------------------
+pytest==8.3.4
+pytest-cov==6.0.0
+httpx==0.28.1

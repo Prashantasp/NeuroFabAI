@@ -1,103 +1,198 @@
+"""Coordinator agent: plans retrieval, then synthesises the final answer.
+
+Synthesis is genuinely model-driven. When the model is unavailable the workflow
+records an error and returns no decision -- it does not fabricate one. The UI
+surfaces that as a retryable error state, which is honest; a templated
+"executive summary" that looks like analysis is not.
+"""
+
+from __future__ import annotations
+
+import logging
+import re
 import time
-from app.schemas.agents import AgentState, ReasoningTimelineEvent, DecisionResponse
+from typing import Dict, List, Optional
+
+from app.schemas.agents import (
+    Citation,
+    DecisionResponse,
+    LLMDecision,
+    ReasoningTimelineEvent,
+    AgentState,
+)
+from app.services.agents.prompts import synthesis_prompt, system_prompt, evidence_sources
+from app.services.entity_resolver import entity_resolver
+from app.services.graph_service import get_graph_backend
+from app.services.llm import LLMError, coerce_str_list, get_llm_provider
+
+logger = logging.getLogger(__name__)
+
+TROUBLESHOOTING_KEYWORDS = (
+    "why", "fix", "overheat", "failure", "fail", "broken", "vibration", "leak",
+    "troubleshoot", "repair", "issue", "alarm", "trip", "temperature", "fault",
+    "degrad", "root cause", "not working", "abnormal",
+)
+GRAPH_KEYWORDS = (
+    "related", "component", "connected", "subgraph", "topology", "relationship",
+    "depend", "where", "contains", "hierarchy", "part of", "linked", "upstream",
+    "downstream",
+)
+
 
 def coordinator_planning(state: AgentState) -> AgentState:
-    """Analyzes query and sets the initial execution plan."""
-    start_time = time.time()
-    
-    query = state.query.lower()
-    
-    # Simple Mock NLP Planning
-    state.entities = []
-    if "p-101" in query or "pump" in query:
-        state.entities.append("Pump P-101")
-    if "bearing" in query:
-        state.entities.append("Outboard Bearing")
-        
-    is_troubleshooting = any(kw in query for kw in ["why", "fix", "overheating", "failure", "broken"])
-    is_graph_heavy = any(kw in query for kw in ["related", "components", "connected"])
-    
+    """Resolve query entities against the graph and choose which agents to run."""
+    started = time.perf_counter()
+
+    query_lower = state.query.lower()
+    topology = get_graph_backend().get_topology(workspace_id=state.workspace_id)
+    state.entities = entity_resolver.extract_and_resolve(state.query, topology)
+
+    is_troubleshooting = any(kw in query_lower for kw in TROUBLESHOOTING_KEYWORDS)
+    is_graph_heavy = any(kw in query_lower for kw in GRAPH_KEYWORDS)
+
     if is_troubleshooting:
         state.intent = "troubleshooting"
         state.target_agents = ["search_agent", "graph_agent", "maintenance_agent"]
-    elif is_graph_heavy:
+    elif is_graph_heavy or state.entities:
         state.intent = "relationship reasoning"
-        state.target_agents = ["graph_agent"]
+        state.target_agents = ["graph_agent", "search_agent", "maintenance_agent"]
     else:
         state.intent = "semantic lookup"
-        state.target_agents = ["search_agent"]
-        
-    state.timeline.append(ReasoningTimelineEvent(
-        agent_name="CoordinatorAgent",
-        action="Plan Workflow",
-        duration_ms=(time.time() - start_time) * 1000,
-        summary=f"Detected intent '{state.intent}'. Delegating to: {', '.join(state.target_agents)}.",
-        evidence_generated=0
-    ))
+        state.target_agents = ["search_agent", "graph_agent"]
+
+    entity_desc = ", ".join(state.entities) if state.entities else "none matched in graph"
+    state.timeline.append(
+        ReasoningTimelineEvent(
+            agent_name="Coordinator",
+            action="Plan retrieval",
+            duration_ms=(time.perf_counter() - started) * 1000,
+            summary=(
+                f"Intent '{state.intent}'. Entities: {entity_desc}. "
+                f"Delegating to {', '.join(state.target_agents)}."
+            ),
+            evidence_generated=len(state.entities),
+        )
+    )
     return state
+
+
+def _checked_citations(raw, state):
+    sources = evidence_sources(state.semantic_chunks, state.graph_edges)
+    claims = {value.strip() for value in [raw.executive_summary, raw.root_cause,
+        raw.recommended_action, raw.business_impact, *raw.supporting_evidence] if value.strip()}
+    if raw.risk_level:
+        claims.add(raw.risk_level)
+    citations = []
+    seen_references = set()
+    supported = set()
+    for reference in raw.references:
+        source = sources.get(reference.source_id)
+        quote = " ".join(reference.quote.split())
+        claim = reference.claim.strip()
+        if not source or claim not in claims or len(quote) < 12 or quote not in source["text"]:
+            return []
+        if claim == raw.risk_level and not re.search(r"\b" + re.escape(raw.risk_level) + r"\b", quote, re.IGNORECASE):
+            return []
+        supported.add(claim)
+        key = (reference.source_id, claim, quote)
+        if key in seen_references:
+            continue
+        seen_references.add(key)
+        citations.append(Citation(source_id=reference.source_id, claim=claim, snippet=quote,
+            **{key: value for key, value in source.items() if key != "text"}))
+    return citations if claims and supported == claims else []
+
 
 def coordinator_synthesis(state: AgentState) -> AgentState:
-    """Assembles the final decision response based on gathered evidence."""
-    start_time = time.time()
-    
-    chunks_count = len(state.semantic_chunks)
-    nodes_count = len(state.graph_nodes)
-    edges_count = len(state.graph_edges)
-    
-    # 1. Synthesize Executive Summary
-    summary = f"Analyzed {chunks_count} semantic chunks and {edges_count} graph relationships."
-    
-    # 2. Extract Citations & Supporting Evidence
-    citations = []
-    supporting_evidence = []
-    for chunk in state.semantic_chunks:
-        doc_id = chunk.get("document_id", "Unknown")
-        citations.append({"document_id": doc_id, "type": "semantic"})
-        
-    for edge in state.graph_edges:
-        if "evidence" in edge:
-            supporting_evidence.append(edge["evidence"])
-            
-    # 3. Incorporate Maintenance Insights if available
-    m_insights = state.maintenance_insights
-    root_cause = m_insights.get("root_cause", "No specific root cause identified in retrieved context.")
-    rec_action = m_insights.get("recommended_action", "No action required. System operating normally.")
-    impact = m_insights.get("business_impact", "Negligible")
-    risk = m_insights.get("risk_level", "Low")
-    
-    # 4. Confidence calculation
-    confidence = 0.5
-    if chunks_count > 0: confidence += 0.2
-    if edges_count > 0: confidence += 0.2
-    if m_insights: confidence += 0.09
-    
-    state.final_decision = DecisionResponse(
-        executive_summary=summary,
-        root_cause=root_cause,
-        supporting_evidence=supporting_evidence,
-        recommended_action=rec_action,
-        business_impact=impact,
-        risk_level=risk,
-        confidence=min(1.0, confidence),
-        citations=citations
+    """Turn retrieved evidence into a structured decision using the LLM."""
+    started = time.perf_counter()
+    provider = get_llm_provider()
+
+    if not provider.available:
+        state.errors.append(
+            "AI synthesis is unavailable: no language model is configured on this server."
+        )
+        state.timeline.append(
+            ReasoningTimelineEvent(
+                agent_name="Coordinator",
+                action="Synthesise answer",
+                duration_ms=(time.perf_counter() - started) * 1000,
+                summary="Skipped: no language model configured (set GOOGLE_API_KEY).",
+                status="skipped",
+            )
+        )
+        return state
+
+    prompt = synthesis_prompt(
+        query=state.query,
+        chunks=state.semantic_chunks,
+        nodes=state.graph_nodes,
+        edges=state.graph_edges,
+        signals=state.signals,
+        history=state.history,
     )
-    
-    state.timeline.append(ReasoningTimelineEvent(
-        agent_name="CoordinatorAgent",
-        action="Synthesize Decision",
-        duration_ms=(time.time() - start_time) * 1000,
-        summary="Successfully assembled structured DecisionResponse.",
-        evidence_generated=1
-    ))
+
+    try:
+        raw = provider.generate_structured(
+            prompt,
+            LLMDecision,
+            system=system_prompt(state.mode),
+        )
+    except LLMError as exc:
+        logger.warning("LLM synthesis failed: %s", exc)
+        state.errors.append(exc.user_message)
+        state.timeline.append(
+            ReasoningTimelineEvent(
+                agent_name="Coordinator",
+                action="Synthesise answer",
+                duration_ms=(time.perf_counter() - started) * 1000,
+                summary=f"Failed: {exc.user_message}",
+                status="failed",
+            )
+        )
+        return state
+
+    citations = _checked_citations(raw, state)
+    if citations:
+        decision = DecisionResponse(
+            executive_summary=raw.executive_summary.strip(),
+            root_cause=raw.root_cause.strip(),
+            supporting_evidence=coerce_str_list(raw.supporting_evidence),
+            recommended_action=raw.recommended_action.strip(),
+            business_impact=raw.business_impact.strip(),
+            risk_level=raw.risk_level,
+            confidence=None,
+            citations=citations,
+            grounded=False,
+            evidence_status="references_checked",
+        )
+    else:
+        decision = DecisionResponse(
+            executive_summary="The available sources do not establish a supported answer to this question.",
+            root_cause="Not established by the cited sources.",
+            supporting_evidence=[], recommended_action="Review the original documents or add relevant evidence.",
+            business_impact="Not established by the cited sources.",
+            confidence=None, grounded=False, evidence_status="insufficient",
+        )
+    state.final_decision = decision
+
+    state.timeline.append(
+        ReasoningTimelineEvent(
+            agent_name="Coordinator",
+            action="Synthesise answer",
+            duration_ms=(time.perf_counter() - started) * 1000,
+            summary=(
+                f"Produced an AI draft with {len(decision.citations)} checked source references; "
+                "claim accuracy requires review."
+            ),
+            evidence_generated=len(decision.supporting_evidence),
+        )
+    )
     return state
 
-# Routing logic
+
 def coordinator_router(state: AgentState) -> str:
-    # After planning, route to the first target agent
-    if "search_agent" in state.target_agents:
-        return "search_agent"
-    if "graph_agent" in state.target_agents:
-        return "graph_agent"
-    if "maintenance_agent" in state.target_agents:
-        return "maintenance_agent"
+    for agent in ("search_agent", "graph_agent", "maintenance_agent"):
+        if agent in state.target_agents:
+            return agent
     return "coordinator_synthesis"

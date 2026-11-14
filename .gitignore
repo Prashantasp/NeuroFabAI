@@ -2,18 +2,27 @@
 # Python
 # =========================
 backend/venv/
+backend/.venv/
 **/__pycache__/
 *.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
 # =========================
-# Database
+# Local data (derived; PostgreSQL is the source of truth)
 # =========================
 backend/qdrant_data/
+backend/data/documents/
 *.db
+*.sqlite3
 
 # =========================
-# Environment Variables
+# Environment variables
 # =========================
+# Never commit real credentials. `.env.example` files are the documented template.
 .env
 .env.*
 !.env.example
@@ -24,28 +33,22 @@ backend/qdrant_data/
 frontend/node_modules/
 frontend/.next/
 frontend/out/
+frontend/next-env.d.ts
+frontend/.vercel/
 
 # =========================
-# Logs
+# Verification artefacts
+# =========================
+frontend/e2e-shots/
+frontend/lint-report.json
+frontend/test-results/
+
+# =========================
+# Logs / OS / IDE
 # =========================
 *.log
-
-# =========================
-# IDE
-# =========================
+npm-debug.log*
 .vscode/
-
-# =========================
-# OS Files
-# =========================
+.idea/
 .DS_Store
 Thumbs.db
-
-# =========================
-# Coverage / Cache
-# =========================
-coverage/
-.cache/
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/

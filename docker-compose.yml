@@ -1,4 +1,7 @@
-version: '3.8'
+# Local development infrastructure for NeuroFab AI.
+#
+# Starts the three stateful services the backend depends on. The API and the
+# frontend run on the host so that reload-on-save works.
 
 services:
   postgres:
@@ -12,6 +15,12 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      # `alembic upgrade head` fails confusingly if Postgres is still starting.
+      test: ["CMD-SHELL", "pg_isready -U neurofab -d neurofab_ai"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
     restart: unless-stopped
 
   qdrant:
@@ -29,11 +38,17 @@ services:
     container_name: neurofab_neo4j
     environment:
       NEO4J_AUTH: neo4j/neurofab_password
+      NEO4J_server_memory_heap_max__size: 512M
     ports:
-      - "7474:7474" # HTTP UI
-      - "7687:7687" # Bolt port
+      - "7474:7474"   # browser UI
+      - "7687:7687"   # bolt
     volumes:
       - neo4j_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:7474 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
     restart: unless-stopped
 
 volumes:

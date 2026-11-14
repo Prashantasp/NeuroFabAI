@@ -1,45 +1,56 @@
-import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import type { Metadata, Viewport } from "next";
+import { Inter, JetBrains_Mono } from "next/font/google";
+
 import "./globals.css";
 import { ThemeProvider } from "@/components/layout/theme-provider";
-import { Sidebar } from "@/components/layout/sidebar";
-import { Header } from "@/components/layout/header";
-import { TooltipProvider } from "@/components/ui/tooltip";
-import { SystemStatus } from "@/components/system-status";
+import { ToastProvider } from "@/components/ui/toast";
+import { AuthProvider } from "@/contexts/AuthContext";
 
-const inter = Inter({ subsets: ["latin"] });
+const inter = Inter({
+  subsets: ["latin"],
+  variable: "--font-sans",
+  display: "swap",
+});
+
+const mono = JetBrains_Mono({
+  subsets: ["latin"],
+  variable: "--font-mono",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
-  title: "NeuroFab AI: The Operating System for Industrial Intelligence",
-  description: "Advanced GraphRAG-based AI platform for Industrial Intelligence.",
+  title: {
+    default: "NeuroFab AI",
+    template: "%s · NeuroFab AI",
+  },
+  description:
+    "Turn industrial documents into a queryable knowledge graph, and ask questions that cite their sources.",
 };
 
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f7f8f9" },
+    { media: "(prefers-color-scheme: dark)", color: "#1b1d21" },
+  ],
+  width: "device-width",
+  initialScale: 1,
+  // Not locked: pinch-zoom must stay available for accessibility.
+  viewportFit: "cover",
+};
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body className={`${inter.className} dark bg-zinc-950 text-zinc-50 overflow-hidden`}>
+    <html lang="en" suppressHydrationWarning className={`${inter.variable} ${mono.variable}`}>
+      <body className="min-h-dvh antialiased">
         <ThemeProvider
           attribute="class"
-          defaultTheme="dark"
-          enableSystem={false}
+          defaultTheme="system"
+          enableSystem
           disableTransitionOnChange
         >
-          <div className="flex h-screen w-full">
-            <Sidebar />
-            <div className="flex flex-1 flex-col overflow-hidden">
-              <Header />
-              <main className="flex-1 overflow-y-auto bg-zinc-950/50 relative">
-                <TooltipProvider>
-                  {children}
-                  <SystemStatus />
-                </TooltipProvider>
-              </main>
-            </div>
-          </div>
+          <ToastProvider>
+            <AuthProvider>{children}</AuthProvider>
+          </ToastProvider>
         </ThemeProvider>
       </body>
     </html>

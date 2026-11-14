@@ -1,185 +1,182 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { CheckCircle2, Activity, FileText, Database, GitBranch, Cpu, Clock, Search, ExternalLink } from "lucide-react";
-import { api, DocumentResponse, GraphStats } from "@/lib/api";
+/**
+ * Landing page.
+ *
+ * Trimmed to what is actually true about the product. The previous version
+ * advertised "100% Audit", "LangGraph Coordination" and a five-stage pipeline
+ * diagram, some of which did not match the implementation.
+ */
+
 import Link from "next/link";
+import {
+  ArrowRight,
+  FileText,
+  Loader2,
+  MessagesSquare,
+  Network,
+  Quote,
+  ShieldCheck,
+} from "lucide-react";
 
-export default function CommandCenter() {
-  const [documents, setDocuments] = useState<DocumentResponse[]>([]);
-  const [stats, setStats] = useState<GraphStats | null>(null);
+import { ThemeToggle } from "@/components/layout/theme-toggle";
+import { Button } from "@/components/ui/button";
+import { useAuth } from "@/contexts/AuthContext";
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const [docsData, statsData] = await Promise.all([
-          api.getDocuments(),
-          api.getGraphStats()
-        ]);
-        setDocuments(docsData.sort((a, b) => new Date(b.uploaded_at).getTime() - new Date(a.uploaded_at).getTime()));
-        setStats(statsData);
-      } catch (e) {
-        console.error("Failed to fetch dashboard data", e);
-      }
-    };
-    fetchData();
-    const interval = setInterval(fetchData, 5000);
-    return () => clearInterval(interval);
-  }, []);
+const STEPS = [
+  {
+    icon: FileText,
+    title: "Upload your PDFs",
+    body: "Manuals, SOPs, inspection reports. Text is extracted, split into passages, and indexed for semantic search.",
+  },
+  {
+    icon: Network,
+    title: "Get a knowledge graph",
+    body: "Equipment, components, failure modes and the relationships between them are extracted and linked back to the page they came from.",
+  },
+  {
+    icon: MessagesSquare,
+    title: "Ask questions",
+    body: "The Copilot retrieves relevant passages and graph paths, then answers from that evidence — with the sources attached.",
+  },
+];
 
-  const processingDocs = documents.filter(d => d.status !== 'Ready' && d.status !== 'Failed').length;
-  const readyDocs = documents.filter(d => d.status === 'Ready').length;
+export default function LandingPage() {
+  const { isAuthenticated, isLoading, user } = useAuth();
 
   return (
-    <div className="p-6 max-w-[1600px] mx-auto space-y-6">
-      
-      {/* Top KPI Row */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card className="bg-zinc-900 border-zinc-800">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-zinc-400">Total Documents</CardTitle>
-            <FileText className="h-4 w-4 text-emerald-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-zinc-100">{documents.length}</div>
-            <p className="text-xs text-zinc-500 mt-1">
-              {readyDocs} Indexed • {processingDocs} Processing
-            </p>
-          </CardContent>
-        </Card>
-        
-        <Card className="bg-zinc-900 border-zinc-800">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-zinc-400">Knowledge Nodes</CardTitle>
-            <Database className="h-4 w-4 text-cyan-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-zinc-100">{stats?.total_nodes || 0}</div>
-            <p className="text-xs text-zinc-500 mt-1">Extracted Entities</p>
-          </CardContent>
-        </Card>
+    <div className="flex min-h-dvh flex-col bg-surface">
+      <header className="sticky top-0 z-30 border-b bg-background/85 backdrop-blur-md">
+        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:px-6">
+          <Link href="/" className="flex items-center gap-2.5">
+            <span
+              className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground"
+              aria-hidden
+            >
+              <Network className="size-4.5" />
+            </span>
+            <span className="text-[15px] font-semibold tracking-tight">NeuroFab AI</span>
+          </Link>
 
-        <Card className="bg-zinc-900 border-zinc-800">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-zinc-400">Knowledge Edges</CardTitle>
-            <GitBranch className="h-4 w-4 text-purple-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-zinc-100">{stats?.total_relationships || 0}</div>
-            <p className="text-xs text-zinc-500 mt-1">Validated Relationships</p>
-          </CardContent>
-        </Card>
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            {isLoading ? (
+              <Loader2 className="size-4 animate-spin text-muted-foreground" aria-label="Loading" />
+            ) : isAuthenticated ? (
+              <Button render={<Link href="/dashboard" />} size="sm">
+                  Open workspace
+                  <ArrowRight className="size-3.5" />
+            </Button>
+            ) : (
+              <>
+                <Button render={<Link href="/login" />} variant="ghost" size="sm">Sign in
+            </Button>
+                <Button render={<Link href="/register" />} size="sm">Get started
+            </Button>
+              </>
+            )}
+          </div>
+        </div>
+      </header>
 
-        <Card className="bg-zinc-900 border-zinc-800">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-zinc-400">Active Agents</CardTitle>
-            <Cpu className="h-4 w-4 text-amber-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-zinc-100">4</div>
-            <p className="text-xs text-zinc-500 mt-1">Orchestrator, Search, Graph, Maintenance</p>
-          </CardContent>
-        </Card>
-      </div>
+      <main className="flex-1">
+        <section className="mx-auto max-w-3xl px-4 py-16 text-center sm:px-6 sm:py-24">
+          <h1 className="text-3xl font-semibold tracking-tight text-balance sm:text-5xl">
+            Ask your industrial documents a question.
+            <span className="block text-muted-foreground">Get an answer that cites them.</span>
+          </h1>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        
-        {/* Recent Document Activity */}
-        <Card className="bg-zinc-900 border-zinc-800 flex-1">
-          <CardHeader className="flex flex-row items-center justify-between">
-            <div>
-              <CardTitle className="text-zinc-100">Recent Ingestions</CardTitle>
-              <CardDescription className="text-zinc-400">Latest files processed by the pipeline.</CardDescription>
-            </div>
-            <Link href="/hub">
-              <Badge variant="outline" className="cursor-pointer hover:bg-zinc-800 border-zinc-700 text-zinc-400">View Hub <ExternalLink className="w-3 h-3 ml-1" /></Badge>
-            </Link>
-          </CardHeader>
-          <CardContent>
-            <ScrollArea className="h-[300px] pr-4">
-              <div className="space-y-4">
-                {documents.length === 0 ? (
-                  <div className="text-center text-zinc-500 py-10">No documents ingested yet.</div>
-                ) : (
-                  documents.slice(0, 10).map((doc) => (
-                    <div key={doc.id} className="flex items-start justify-between border-b border-zinc-800/50 pb-3 last:border-0">
-                      <div className="flex gap-3">
-                        <div className={`mt-0.5 ${doc.status === 'Ready' ? 'text-emerald-500' : doc.status === 'Failed' ? 'text-rose-500' : 'text-amber-500 animate-pulse'}`}>
-                          {doc.status === 'Ready' ? <CheckCircle2 className="h-4 w-4" /> : doc.status === 'Failed' ? <Activity className="h-4 w-4" /> : <Clock className="h-4 w-4" />}
-                        </div>
-                        <div className="space-y-1">
-                          <p className="text-sm font-medium text-zinc-300">{doc.filename}</p>
-                          <p className="text-xs text-zinc-500">{new Date(doc.uploaded_at).toLocaleString()}</p>
-                        </div>
-                      </div>
-                      <Badge variant="outline" className="border-zinc-800 bg-zinc-950 text-zinc-400 font-mono text-[10px]">
-                        {doc.status}
-                      </Badge>
-                    </div>
-                  ))
-                )}
+          <p className="mx-auto mt-5 max-w-xl text-base text-muted-foreground text-pretty sm:text-lg">
+            NeuroFab turns manuals, SOPs and maintenance reports into a searchable knowledge
+            graph, then answers operational questions from what your documents actually say.
+          </p>
+
+          <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
+            <Button render={<Link href={isAuthenticated ? "/dashboard" : "/register"} />} size="lg">
+                {isAuthenticated ? `Continue as ${user?.full_name ?? "you"}` : "Create an account"}
+                <ArrowRight className="size-4" />
+            </Button>
+            {!isAuthenticated && (
+              <Button render={<Link href="/login" />} size="lg" variant="outline">Sign in
+            </Button>
+            )}
+          </div>
+        </section>
+
+        <section className="border-y bg-background">
+          <div className="mx-auto grid max-w-5xl gap-8 px-4 py-14 sm:px-6 md:grid-cols-3">
+            {STEPS.map((step, index) => (
+              <div key={step.title} className="space-y-2.5">
+                <div className="flex items-center gap-2.5">
+                  <span
+                    className="flex size-9 items-center justify-center rounded-lg bg-primary/12 text-primary"
+                    aria-hidden
+                  >
+                    <step.icon className="size-4.5" />
+                  </span>
+                  <span className="text-xs font-medium tabular text-muted-foreground">
+                    Step {index + 1}
+                  </span>
+                </div>
+                <h2 className="text-base font-semibold">{step.title}</h2>
+                <p className="text-sm leading-relaxed text-muted-foreground">{step.body}</p>
               </div>
-            </ScrollArea>
-          </CardContent>
-        </Card>
+            ))}
+          </div>
+        </section>
 
-        {/* System Health Overview */}
-        <Card className="bg-zinc-900 border-zinc-800 flex-1 flex flex-col">
-          <CardHeader className="flex flex-row items-center justify-between">
-            <div>
-              <CardTitle className="text-zinc-100">System Health</CardTitle>
-              <CardDescription className="text-zinc-400">Live component statuses.</CardDescription>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4 flex-1">
-            <div className="p-4 border border-zinc-800 rounded bg-zinc-950 flex justify-between items-center">
-               <div className="flex items-center gap-3">
-                 <Database className="w-5 h-5 text-emerald-500" />
-                 <div>
-                   <p className="text-sm font-medium text-zinc-200">Vector Store (Qdrant)</p>
-                   <p className="text-xs text-zinc-500">Connected • FAISS In-Memory Mode</p>
-                 </div>
-               </div>
-               <Badge className="bg-emerald-500/10 text-emerald-400 border-none">Online</Badge>
-            </div>
-            
-            <div className="p-4 border border-zinc-800 rounded bg-zinc-950 flex justify-between items-center">
-               <div className="flex items-center gap-3">
-                 <GitBranch className="w-5 h-5 text-emerald-500" />
-                 <div>
-                   <p className="text-sm font-medium text-zinc-200">Graph Database (NetworkX)</p>
-                   <p className="text-xs text-zinc-500">Connected • {stats?.total_nodes || 0} Nodes</p>
-                 </div>
-               </div>
-               <Badge className="bg-emerald-500/10 text-emerald-400 border-none">Online</Badge>
-            </div>
+        <section className="mx-auto max-w-5xl px-4 py-14 sm:px-6">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Feature
+              icon={Quote}
+              title="Grounded, not guessed"
+              body="Answers are built only from retrieved passages and graph relationships. When the documents do not support an answer, the Copilot says so and lowers its confidence rather than inventing one."
+            />
+            <Feature
+              icon={ShieldCheck}
+              title="Isolated per workspace"
+              body="Documents, indexed passages and graph entities are scoped to a workspace, and every request is authorised server-side against your membership."
+            />
+          </div>
+        </section>
+      </main>
 
-            <div className="p-4 border border-zinc-800 rounded bg-zinc-950 flex justify-between items-center">
-               <div className="flex items-center gap-3">
-                 <Cpu className="w-5 h-5 text-emerald-500" />
-                 <div>
-                   <p className="text-sm font-medium text-zinc-200">Multi-Agent Orchestrator</p>
-                   <p className="text-xs text-zinc-500">LangGraph-inspired StateGraph</p>
-                 </div>
-               </div>
-               <Badge className="bg-emerald-500/10 text-emerald-400 border-none">Online</Badge>
-            </div>
+      <footer className="border-t bg-background">
+        <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 px-4 py-6 text-sm text-muted-foreground sm:flex-row sm:px-6">
+          <p>NeuroFab AI</p>
+          <div className="flex gap-4">
+            <Link href="/login" className="hover:text-foreground">
+              Sign in
+            </Link>
+            <Link href="/register" className="hover:text-foreground">
+              Create account
+            </Link>
+          </div>
+        </div>
+      </footer>
+    </div>
+  );
+}
 
-            <div className="mt-6 border border-cyan-500/30 bg-cyan-500/10 rounded-lg p-4 text-center">
-               <Search className="w-6 h-6 text-cyan-400 mx-auto mb-2" />
-               <p className="text-sm text-zinc-300 font-medium">Ready to analyze</p>
-               <p className="text-xs text-zinc-500 mt-1 mb-3">The NeuroFab backend is fully operational.</p>
-               <Link href="/copilot">
-                 <Badge className="bg-cyan-600 hover:bg-cyan-500 text-white cursor-pointer px-3 py-1">Open Copilot</Badge>
-               </Link>
-            </div>
-          </CardContent>
-        </Card>
-
-      </div>
+function Feature({
+  icon: Icon,
+  title,
+  body,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  title: string;
+  body: string;
+}) {
+  return (
+    <div className="rounded-xl border bg-card p-5">
+      <span
+        className="flex size-9 items-center justify-center rounded-lg bg-primary/12 text-primary"
+        aria-hidden
+      >
+        <Icon className="size-4.5" />
+      </span>
+      <h2 className="mt-3 text-base font-semibold">{title}</h2>
+      <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{body}</p>
     </div>
   );
 }

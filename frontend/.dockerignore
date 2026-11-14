@@ -1,0 +1,10 @@
+node_modules/
+.next/
+out/
+e2e-shots/
+e2e-verify.mjs
+lint-report.json
+.env
+.env.*
+!.env.example
+*.log
